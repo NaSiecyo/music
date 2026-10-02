@@ -11,7 +11,7 @@ export async function onRequest(context) {
   };
   targetPath = pathMap[targetPath] || targetPath;
 
-  const targetUrl = `https://ncmapi.furryopen.com${targetPath}${url.search}`;
+  const targetUrl = `https://nmapi.furryopen.com${targetPath}${url.search}`;
 
   const resp = await fetch(targetUrl, {
     method: request.method,
