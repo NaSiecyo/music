@@ -3,7 +3,7 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   // 将 /api/xxx 的请求转发到你的 ncm-api 后端
   const targetPath = url.pathname.replace('/api/', '/');
-  const targetUrl = `https://ncmdown.furryopen.com${targetPath}${url.search}`; // 替换为你的API域名
+  const targetUrl = `https://nmapi.furryopen.com${targetPath}${url.search}`; // 替换为你的API域名
   const resp = await fetch(targetUrl, {
     method: request.method,
     headers: request.headers,
