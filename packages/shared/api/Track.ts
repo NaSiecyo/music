@@ -25,11 +25,34 @@ export interface FetchTracksResponse {
   }
 }
 
-// 获取音源URL
+// ============================================================
+// 音质等级类型（与 settings.ts 里保持一致）
+// ============================================================
+export type AudioLevelType =
+  | 'standard'
+  | 'higher'
+  | 'exhigh'
+  | 'lossless'
+  | 'hires'
+  | 'jyeffect'
+  | 'sky'
+  | 'jymaster'
 
+// 获取音源URL
 export interface FetchAudioSourceParams {
   id: number
-  level?: 'standard' | 'higher' | 'exhigh' | 'lossless' | 'hires' // 128kbps 192kbps 320kbps Lossless Hi-Res
+  /**
+   * 音质等级：
+   *  - standard: 128kbps
+   *  - higher:   192kbps
+   *  - exhigh:   320kbps（推荐，无需 VIP）
+   *  - lossless: 无损 FLAC（需 VIP）
+   *  - hires:    Hi-Res（需 VIP）
+   *  - jyeffect: 高清环绕声（需 VIP）
+   *  - sky:      沉浸环绕声（需 VIP）
+   *  - jymaster: 超清母带（需 SVIP）
+   */
+  level?: AudioLevelType
   qqCookie?: string
   miguCookie?: string
   jooxCookie?: string
@@ -40,7 +63,7 @@ export interface FetchAudioSourceResponse {
     br: number
     canExtend: boolean
     code: number
-    encodeType: 'mp3' | null
+    encodeType: 'mp3' | 'flac' | null
     expi: number
     fee: number
     flag: number
@@ -53,11 +76,11 @@ export interface FetchAudioSourceResponse {
     freeTrialInfo: null
     gain: number
     id: number
-    level: 'standard' | 'null'
+    level: AudioLevelType | 'null'
     md5: string | null
     payed: number
     size: number
-    type: 'mp3' | null
+    type: 'mp3' | 'flac' | null
     uf: null
     url: string | null
     urlSource: number
@@ -65,7 +88,6 @@ export interface FetchAudioSourceResponse {
 }
 
 // 获取歌词
-
 export interface FetchLyricParams {
   id: number
 }
