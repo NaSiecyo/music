@@ -1,11 +1,310 @@
-private async _playAudioViaHowler(audio: string, id: number, autoplay: boolean = true) {
-    // 只卸载我们自己的 _howler，而不是全局 Howler.unload()。
-    // 全局 unload 会移除所有 <audio> 元素，导致 React portal 崩溃。
+import { Howl, Howler } from 'howler'
+import {
+  fetchAudioSourceWithReactQuery,
+  fetchTracksWithReactQuery,
+} from '@/web/api/hooks/useTracks'
+import { fetchPersonalFMWithReactQuery } from '@/web/api/hooks/usePersonalFM'
+import { fmTrash } from '@/web/api/personalFM'
+import { cacheAudio } from '@/web/api/r3play'
+import { clamp, random } from 'lodash-es'
+import axios from 'axios'
+import { resizeImage } from './common'
+import { fetchPlaylistWithReactQuery } from '@/web/api/hooks/usePlaylist'
+import { fetchAlbumWithReactQuery } from '@/web/api/hooks/useAlbum'
+import { RepeatMode } from '@/shared/playerDataTypes'
+import toast from 'react-hot-toast'
+import { scrobble } from '@/web/api/user'
+import { fetchArtistWithReactQuery } from '../api/hooks/useArtist'
+import { appName } from './const'
+import { isLyricsWindow } from './isLyricsWindow'
+
+type TrackID = number
+export enum TrackListSourceType {
+  Album = 'album',
+  Playlist = 'playlist',
+  Artist = 'artist',
+}
+interface TrackListSource {
+  type: TrackListSourceType
+  id: number
+}
+
+export enum Mode {
+  TrackList = 'trackList',
+  FM = 'fm',
+}
+export enum State {
+  Initializing = 'initializing',
+  Ready = 'ready',
+  Playing = 'playing',
+  Paused = 'paused',
+  Loading = 'loading',
+}
+
+const PLAY_PAUSE_FADE_DURATION = 200
+
+let _howler = new Howl({ src: [''], format: ['mp3', 'flac'] })
+
+export class Player {
+  private _track: Track | null = null
+  private _trackIndex: number = 0
+  private _progress: number = 0
+  private _progressInterval: ReturnType<typeof setInterval> | undefined
+  private _volume: number = 1 // 0 to 1
+  private _repeatMode: RepeatMode = RepeatMode.Off
+
+  state: State = State.Initializing
+  mode: Mode = Mode.TrackList
+  trackList: TrackID[] = []
+  originTrackList: TrackID[] = []
+  trackListSource: TrackListSource | null = null
+  fmTrackList: TrackID[] = []
+  shuffle: boolean = false
+  fmTrack: Track | null = null
+
+  /**
+   * Persistence hook, set by the store (states/player.ts). Invoked after a
+   * user-initiated seek — a seek only mutates `_progress`, which the
+   * throttled persistence deliberately skips, so the resume position is
+   * written eagerly through this hook instead.
+   */
+  _onUserSeek: (() => void) | null = null
+
+  init(params: { [key: string]: any }) {
+    if (params._track) this._track = params._track
+    if (params._trackIndex) this._trackIndex = params._trackIndex
+    if (params._volume) this._volume = params._volume
+    if (params._repeatMode) this._repeatMode = params._repeatMode
+    if (params.state) this.trackList = params.state
+    if (params.mode) this.mode = params.mode
+    if (params.trackList) this.trackList = params.trackList
+    if (params.trackListSource) this.trackListSource = params.trackListSource
+    if (params.fmTrackList) this.fmTrackList = params.fmTrackList
+    if (params.shuffle) {
+      this.shuffle = params.shuffle
+      this.shufflePlayList()
+    }
+    if (params.fmTrack) this.fmTrack = params.fmTrack
+
+    this.state = State.Ready
+    if (!isLyricsWindow) {
+      if (this.trackID) this._playAudio(false)
+      this._initFM()
+    }
+    this._initMediaSession()
+  }
+
+  get howler() {
+    return _howler
+  }
+
+  get _prevTrackIndex(): number | undefined {
+    switch (this.repeatMode) {
+      case RepeatMode.One:
+        return this._trackIndex
+      case RepeatMode.Off:
+        if (this._trackIndex === 0) return 0
+        return this._trackIndex - 1
+      case RepeatMode.On:
+        if (this._trackIndex - 1 < 0) return this.trackList.length - 1
+        return this._trackIndex - 1
+    }
+  }
+
+  get _nextTrackIndex(): number | undefined {
+    switch (this.repeatMode) {
+      case RepeatMode.One:
+        return this._trackIndex
+      case RepeatMode.Off:
+        if (this._trackIndex + 1 >= this.trackList.length) return
+        return this._trackIndex + 1
+      case RepeatMode.On:
+        if (this._trackIndex + 1 >= this.trackList.length) return 0
+        return this._trackIndex + 1
+    }
+  }
+
+  get trackID(): TrackID {
+    if (this.mode === Mode.TrackList) {
+      const { trackList, _trackIndex } = this
+      return trackList[_trackIndex] ?? 0
+    }
+    return this.fmTrackList[0] ?? 0
+  }
+
+  set trackID(value) {
+    const { trackList, _trackIndex } = this
+    trackList[_trackIndex] = value
+    this.fmTrackList[0] = value
+  }
+
+  get track(): Track | null {
+    return this.mode === Mode.FM ? this.fmTrack : this._track
+  }
+
+  set track(value) {
+    this._track = value
+  }
+
+  get trackIndex() {
+    return this._trackIndex
+  }
+
+  get progress(): number {
+    return this.state === State.Loading ? 0 : this._progress
+  }
+  set progress(value) {
+    this._progress = value
+    _howler.seek(value)
+    this._onUserSeek?.()
+  }
+
+  liveCurrentTime(): number {
+    if (this.state === State.Loading) return 0
+    if (isLyricsWindow) return this._progress
     try {
-      if (_howler) {
-        _howler.stop()
-        _howler.unload()
+      const t = _howler.seek()
+      if (typeof t === 'number' && !isNaN(t)) return t
+    } catch {
+      /* howler not ready */
+    }
+    return this._progress
+  }
+
+  get volume(): number {
+    return this._volume
+  }
+  set volume(value) {
+    this._volume = clamp(value, 0, 1)
+    Howler.volume(this._volume)
+  }
+
+  get repeatMode(): RepeatMode {
+    return this._repeatMode
+  }
+  set repeatMode(value) {
+    this._repeatMode = value
+  }
+
+  private async _initFM() {
+    if (this.fmTrackList.length === 0) await this._loadMoreFMTracks()
+
+    const trackId = this.fmTrackList[0]
+    const track = await this._fetchTrack(trackId)
+    if (track) this.fmTrack = track
+
+    this._loadMoreFMTracks()
+  }
+
+  private _setStateToLoading() {
+    this._scrobble()
+    this.state = State.Loading
+    _howler.pause()
+  }
+
+  private async _setupProgressInterval() {
+    this._progressInterval = setInterval(() => {
+      if (this.state === State.Playing) this._progress = _howler.seek()
+    }, 500)
+  }
+
+  private async _scrobble() {
+    if (!this.track?.id || !this.trackListSource?.id) {
+      return
+    }
+    if (this.progress <= this.track.dt / 1000 / 3) {
+      return
+    }
+    scrobble({
+      id: this.track.id,
+      sourceid: this.trackListSource.id,
+      time: ~~this.progress,
+    })
+  }
+
+  private async _fetchTrack(trackID: TrackID) {
+    const response = await fetchTracksWithReactQuery({ ids: [trackID] })
+    return response?.songs?.length ? response.songs[0] : null
+  }
+
+  setDevice(deviceId: MediaDeviceInfo['deviceId']) {
+    const audioElement = (_howler as any)._sounds[0]._node
+    audioElement
+      .setSinkId(deviceId)
+      .then(() => {
+        console.log('Audio output device set successfully')
+      })
+      .catch((error: any) => {
+        console.error('Error setting audio output device:', error)
+      })
+  }
+
+  /**
+   * 获取音频源（公开接口）
+   */
+  async getAudioSource(track_id: TrackID, level?: string) {
+    return await this._fetchAudioSource(track_id, level)
+  }
+
+  /**
+   * Fetch track audio source url from Netease
+   */
+  private async _fetchAudioSource(trackID: TrackID, level?: string) {
+    try {
+      const response = await fetchAudioSourceWithReactQuery({
+        id: trackID,
+        level,
+      } as any)
+      let audio = response.data?.[0]?.url
+      if (audio && audio.includes('126.net')) {
+        audio = audio.replace('http://', 'https://')
       }
+      return {
+        audio,
+        id: trackID,
+      }
+    } catch {
+      return {
+        audio: null,
+        id: trackID,
+      }
+    }
+  }
+
+  private async _playTrack() {
+    const id = this.trackID
+    if (!id) return
+    this.state = State.Loading
+    const track = await this._fetchTrack(id)
+    if (!track) {
+      toast('加载歌曲信息失败')
+      return
+    }
+    if (this.mode === Mode.TrackList) this._track = track
+    if (this.mode === Mode.FM) this.fmTrack = track
+    this._updateMediaSessionMetaData()
+    this._playAudio()
+  }
+
+  private async _playAudio(autoplay: boolean = true) {
+    this._progress = 0
+    const { audio, id } = await this._fetchAudioSource(this.trackID)
+
+    if (!audio) {
+      toast('无法播放此歌曲')
+      this.nextTrack()
+      return
+    }
+    if (this.trackID !== id) return
+    this._playAudioViaHowler(audio, id, autoplay)
+  }
+
+  private async _playAudioViaHowler(audio: string, id: number, autoplay: boolean = true) {
+    // 只卸载我们自己的 _howler，而不是全局 Howler.unload()。
+    // 全局 unload 会移除页面中所有 <audio> 元素，导致 React 的 portal
+    // 引用失效，触发 pushHostContainer 崩溃并让整个应用渲染树无法正常工作。
+    try {
+      _howler?.unload()
     } catch {
       /* ignore */
     }
@@ -23,7 +322,6 @@ private async _playAudioViaHowler(audio: string, id: number, autoplay: boolean =
     })
     _howler = howler
 
-    // 设置 crossOrigin 以支持 Web Audio API 分析（呼吸灯效果）
     try {
       const node = (howler as any)._sounds?.[0]?._node
       if (node && node instanceof HTMLMediaElement && node.crossOrigin !== 'anonymous') {
@@ -50,4 +348,299 @@ private async _playAudioViaHowler(audio: string, id: number, autoplay: boolean =
     if (!this._progressInterval) {
       this._setupProgressInterval()
     }
+  }
+
+  private _howlerOnEndCallback() {
+    if (this.mode !== Mode.FM && this.repeatMode === RepeatMode.One) {
+      _howler.seek(0)
+      _howler.play()
+    } else {
+      this.nextTrack()
+    }
+  }
+
+  private async _cacheAudio(audio: string) {
+    if (audio.includes(appName.toLowerCase()) || !window.ipcRenderer) return
+    const id = Number(new URL(audio).searchParams.get('dash-id'))
+    if (isNaN(id) || !id) return
+    const response = await fetchAudioSourceWithReactQuery({ id })
+    cacheAudio(id, audio, response?.data?.[0]?.br)
+  }
+
+  private async _nextFMTrack() {
+    const prefetchNextTrack = async () => {
+      const prefetchTrackID = this.fmTrackList[1]
+      const track = await this._fetchTrack(prefetchTrackID)
+      if (track?.al?.picUrl) {
+        axios.get(resizeImage(track.al.picUrl, 'md'))
+        axios.get(resizeImage(track.al.picUrl, 'xs'))
+      }
+    }
+
+    this.fmTrackList.shift()
+    if (this.fmTrackList.length === 0) await this._loadMoreFMTracks()
+    this._playTrack()
+
+    this.fmTrackList.length <= 1 ? await this._loadMoreFMTracks() : this._loadMoreFMTracks()
+    prefetchNextTrack()
+  }
+
+  private async _loadMoreFMTracks() {
+    if (this.fmTrackList.length <= 5) {
+      const response = await fetchPersonalFMWithReactQuery()
+      const ids = (response?.data?.map(r => r.id) ?? []).filter(r => !this.fmTrackList.includes(r))
+      this.fmTrackList.push(...ids)
+    }
+  }
+
+  play(fade: boolean = false) {
+    if (_howler.playing()) {
+      this.state = State.Playing
+      return
+    }
+    _howler.play()
+    if (fade) {
+      this.state = State.Playing
+      _howler.once('play', () => {
+        _howler.fade(0, this._volume, PLAY_PAUSE_FADE_DURATION)
+      })
+    } else {
+      this.state = State.Playing
+    }
+  }
+
+  pause(fade: boolean = false) {
+    if (fade) {
+      _howler.fade(this._volume, 0, PLAY_PAUSE_FADE_DURATION)
+      this.state = State.Paused
+      _howler.once('fade', () => {
+        _howler.pause()
+      })
+    } else {
+      this.state = State.Paused
+      _howler.pause()
+    }
+  }
+
+  playOrPause(fade: boolean = true) {
+    this.state === State.Playing ? this.pause(fade) : this.play(fade)
+  }
+
+  prevTrack() {
+    this._setStateToLoading()
+    this._progress = 0
+    if (this.mode === Mode.FM) {
+      toast('Personal FM not support previous track')
+      return
+    }
+    if (this._prevTrackIndex === undefined) {
+      toast('No previous track')
+      return
+    }
+    this._trackIndex = this._prevTrackIndex
+    this._playTrack()
+  }
+
+  nextTrack(forceFM: boolean = false) {
+    this._setStateToLoading()
+    this._progress = 0
+    if (forceFM || this.mode === Mode.FM) {
+      this.mode = Mode.FM
+      this._nextFMTrack()
+      return
+    }
+    if (this._nextTrackIndex === undefined) {
+      toast('没有下一首了')
+      this.pause()
+      return
+    }
+    this._trackIndex = this._nextTrackIndex
+
+    this._playTrack()
+  }
+
+  playAList(list: TrackID[], autoPlayTrackID?: null | number) {
+    this._setStateToLoading()
+    this.mode = Mode.TrackList
+    this.trackList = list
+    this._trackIndex = autoPlayTrackID ? list.findIndex(t => t === autoPlayTrackID) : 0
+    this._playTrack()
+  }
+
+  addToFirstPlay(trackID: number) {
+    console.log(`trackID:${trackID}`)
+    if (this.trackList.includes(trackID)) {
+      this.trackList = this.trackList.filter(item => item != trackID)
+      this.trackList.splice(0, 0, trackID)
+      return
+    }
+    this.trackList.splice(0, 0, trackID)
+  }
+
+  addToNextPlay(trackID: number) {
+    if (this.trackList.includes(trackID)) {
+      this.trackList = this.trackList.filter(item => item != trackID)
+      this.trackList.splice(Number(this._nextTrackIndex), 0, trackID)
+      return
+    }
+    this.trackList.splice(Number(this._nextTrackIndex), 0, trackID)
+  }
+
+  deleteFromPlaylist(trackID: number) {
+    if (!this.trackList.includes(trackID)) {
+      return
+    }
+    if (this.track?.id != undefined && this.track?.id != trackID) {
+      this.trackList = this.trackList.filter(item => item != trackID)
+      return
+    }
+    this.prevTrack()
+    this.trackList = this.trackList.filter(item => item != trackID)
+    this.nextTrack()
+  }
+
+  addToPlayList(trackID: number) {
+    if (this.trackList.includes(trackID)) {
+      return
+    }
+    this.trackList.push(trackID)
+  }
+
+  async playPlaylist(id: number | undefined, autoPlayTrackID?: null | number) {
+    if (!id) {
+      toast.error('无法播放: 歌单不存在')
+      return
+    }
+    this._setStateToLoading()
+    const playlist = await fetchPlaylistWithReactQuery({ id })
+    if (!playlist?.playlist?.trackIds?.length) return
+    this.trackListSource = {
+      type: TrackListSourceType.Playlist,
+      id,
+    }
+    this.playAList(
+      playlist.playlist.trackIds.map(t => t.id),
+      autoPlayTrackID
+    )
+  }
+
+  async shufflePlayList() {
+    let playingSongID = this.trackList[this._trackIndex]
+    if (this.shuffle) {
+      this.trackList = Array.from(this.originTrackList)
+      this._trackIndex = this.trackList.indexOf(playingSongID)
+      this.shuffle = !this.shuffle
+      return
+    }
+    this.originTrackList = Array.from(this.trackList)
+    this.shuffle = !this.shuffle
+
+    let len = this.trackList.length,
+      tmp,
+      idx
+    while (len) {
+      idx = Math.floor(Math.min(random(), 0.99999) * len--)
+      tmp = this.trackList[len]
+      this.trackList[len] = this.trackList[idx]
+      this.trackList[idx] = tmp
+    }
+    this._trackIndex = this.trackList.indexOf(playingSongID)
+  }
+
+  async playAlbum(id: number, autoPlayTrackID?: null | number) {
+    this._setStateToLoading()
+    const album = await fetchAlbumWithReactQuery({ id })
+    if (!album?.songs?.length) return
+    this.trackListSource = {
+      type: TrackListSourceType.Album,
+      id,
+    }
+    this.playAList(
+      album.songs.map(t => t.id),
+      autoPlayTrackID
+    )
+  }
+
+  async playArtistPopularTracks(id: number, autoPlayTrackID?: null | number) {
+    this._setStateToLoading()
+    const artist = await fetchArtistWithReactQuery({ id })
+    if (!artist?.hotSongs.length) {
+      toast('无法播放: 没有热门歌曲')
+      return
+    }
+    this.trackListSource = {
+      type: TrackListSourceType.Artist,
+      id,
+    }
+    this.playAList(
+      artist.hotSongs.map(t => t.id),
+      autoPlayTrackID
+    )
+  }
+
+  async playFM() {
+    this._setStateToLoading()
+    this.mode = Mode.FM
+    if (this.fmTrackList.length > 0 && this.fmTrack?.id === this.fmTrackList[0]) {
+      this._track = this.fmTrack
+      this._playAudio()
+    } else {
+      this._playTrack()
+    }
+  }
+
+  async fmTrash() {
+    this.mode = Mode.FM
+    const trashTrackID = this.fmTrackList[0]
+    fmTrash(trashTrackID)
+    this._nextFMTrack()
+  }
+
+  async playTrack(trackID: TrackID) {
+    this._setStateToLoading()
+    const index = this.trackList.findIndex(t => t === trackID)
+    if (index === -1) toast('播放失败，歌曲不在列表内')
+    this._trackIndex = index
+    this._playTrack()
+  }
+
+  private async _initMediaSession() {
+    if ('mediaSession' in navigator === false) return
+    navigator.mediaSession.setActionHandler('play', () => this.play())
+    navigator.mediaSession.setActionHandler('pause', () => this.pause())
+    navigator.mediaSession.setActionHandler('previoustrack', () => this.prevTrack())
+    navigator.mediaSession.setActionHandler('nexttrack', () => this.nextTrack())
+    navigator.mediaSession.setActionHandler('seekto', event => {
+      if (event.seekTime) this.progress = event.seekTime
+    })
+  }
+
+  private async _updateMediaSessionMetaData() {
+    if ('mediaSession' in navigator === false || !this.track) return
+    const track = this.track
+    const metadata = {
+      title: track.name,
+      artist: track.ar.map(a => a.name).join(', '),
+      album: track.al?.name,
+      artwork: [
+        {
+          src: track.al?.picUrl + '?param=256y256',
+          type: 'image/jpg',
+          sizes: '256x256',
+        },
+        {
+          src: track.al?.picUrl + '?param=512y512',
+          type: 'image/jpg',
+          sizes: '512x512',
+        },
+      ],
+      length: this.progress,
+      trackId: track.id,
+    }
+    navigator.mediaSession.metadata = new window.MediaMetadata(metadata)
+  }
+}
+
+if (import.meta.env.DEV) {
+  ;(window as any).howler = _howler
 }
