@@ -71,6 +71,11 @@ const MenuPanel = forwardRef(
       // Container (to add padding for submenus)
       <div
         ref={ref}
+        // 关键：给"真实菜单"和"测量版本"打上不同的 data 标记
+        // contextMenus.ts 里的全局监听器通过这个属性区分两者，
+        // 只把真实菜单当作菜单本体，避免测量版本（在屏幕外）被误判
+        data-context-menu-root={!forMeasure ? 'true' : undefined}
+        data-context-menu-measure={forMeasure ? 'true' : undefined}
         className={cx(
           'app-region-no-drag fixed select-none',
           isSubmenu ? 'submenu z-30 px-1' : 'z-20'
@@ -121,6 +126,9 @@ MenuPanel.displayName = 'Menu'
 
 export default MenuPanel
 
+// ============================================================
+// 子菜单组件
+// ============================================================
 const SubMenu = ({
   items,
   itemRect,
