@@ -1,5 +1,4 @@
-import { assign } from 'lodash-es'
-import { proxy, ref } from 'valtio'
+import { proxy } from 'valtio'
 
 interface ContextMenu {
   target: HTMLElement | null
@@ -26,7 +25,7 @@ const contextMenus = proxy<ContextMenu>(initContextMenu)
 export default contextMenus
 
 // ============================================================
-// 全局监听器（不依赖 React 组件生命周期）
+// 全局监听器
 // ============================================================
 let globalHandler: ((e: MouseEvent) => void) | null = null
 
@@ -52,7 +51,6 @@ const addGlobalListener = () => {
     closeContextMenu()
   }
 
-  // 捕获阶段绑定，不受 stopPropagation 影响
   document.addEventListener('mousedown', globalHandler, true)
   console.log('[menu] 全局监听器已绑定')
 }
@@ -77,7 +75,7 @@ export const openContextMenu = ({
   }
 
   const target = event.target as HTMLElement
-  contextMenus.target = ref(target)
+  contextMenus.target = target
   contextMenus.type = type
   contextMenus.dataSourceID = dataSourceID
   contextMenus.options = options
@@ -90,16 +88,26 @@ export const openContextMenu = ({
 }
 
 // ============================================================
-// 关闭菜单
+// 关闭菜单 —— 关键修复：不用 lodash assign，逐个属性赋值
 // ============================================================
 export const closeContextMenu = () => {
   console.log('[menu] closeContextMenu 被调用')
   removeGlobalListener()
-  assign(contextMenus, initContextMenu)
+
+  contextMenus.target = null
+  contextMenus.cursorPosition = null
+  contextMenus.type = null
+  contextMenus.dataSourceID = null
+  contextMenus.options = null
+
+  console.log('[menu] 状态已重置为:', {
+    type: contextMenus.type,
+    id: contextMenus.dataSourceID,
+  })
 }
 
 // ============================================================
-// 调试用：暴露到 window，方便在 Console 里手动测试
+// 调试用
 // ============================================================
 if (typeof window !== 'undefined') {
   ;(window as any).closeContextMenu = closeContextMenu
