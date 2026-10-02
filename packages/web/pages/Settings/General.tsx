@@ -1,6 +1,10 @@
 import { SupportedLanguage } from '@/web/i18n/i18n'
 import persistedUiStates from '@/web/states/persistedUiStates'
-import settings from '@/web/states/settings'
+import settings, {
+  AUDIO_LEVEL_LABELS,
+  AUDIO_LEVELS_ORDERED,
+  AudioLevel,
+} from '@/web/states/settings'
 import { useTranslation } from 'react-i18next'
 import { useSnapshot } from 'valtio'
 import { BlockTitle, OptionText, Select, Option, Switch } from './Controls'
@@ -89,13 +93,30 @@ function NeteaseMusic() {
   )
 }
 
+// ============================================================
+// 下载设置（新增下载音质选项）
+// ============================================================
 function Download() {
   const { t } = useTranslation()
 
-  const { showDownloadActions } = useSnapshot(settings)
+  const { showDownloadActions, downloadAudioLevel } = useSnapshot(settings)
+
+  // 构造下拉框选项：把音质等级数组转成 Select 组件需要的数据格式
+  // { name: 显示名, value: 实际值 }
+  const audioLevelOptions = AUDIO_LEVELS_ORDERED.map(level => ({
+    name: AUDIO_LEVEL_LABELS[level],
+    value: level,
+  }))
+
+  const setDownloadAudioLevel = (level: AudioLevel) => {
+    settings.downloadAudioLevel = level
+  }
+
   return (
     <div className='mt-7 mb-12'>
       <BlockTitle>{t`settings.title-download`}</BlockTitle>
+
+      {/* 显示下载按钮的开关 */}
       <Option>
         <OptionText>{t`settings.show-download-actions`}</OptionText>
         <Switch
@@ -103,6 +124,23 @@ function Download() {
           onChange={v => (settings.showDownloadActions = v)}
         />
       </Option>
+
+      {/* 下载音质选择 —— 只有开启下载功能时才显示 */}
+      {showDownloadActions && (
+        <Option>
+          <div>
+            <OptionText>下载音质</OptionText>
+            <div className='text-xs opacity-60'>
+              无损及以上需要黑胶 VIP 账号
+            </div>
+          </div>
+          <Select
+            options={audioLevelOptions}
+            value={downloadAudioLevel}
+            onChange={setDownloadAudioLevel}
+          />
+        </Option>
+      )}
     </div>
   )
 }
