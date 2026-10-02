@@ -44,6 +44,7 @@ export function fetchAudioSource(
     url: '/song/url/v1',
     method: 'get',
     params: {
+      // 默认音质（如果 params 里带了 level，会被下面的 ...params 覆盖）
       level: 'exhigh',
       ...params,
       timestamp: Date.now(),
