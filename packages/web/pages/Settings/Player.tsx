@@ -1,4 +1,8 @@
-import settings from '@/web/states/settings'
+import settings, {
+  AUDIO_LEVEL_LABELS,
+  AUDIO_LEVELS_ORDERED,
+  AudioLevel,
+} from '@/web/states/settings'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useSnapshot } from 'valtio'
@@ -8,8 +12,50 @@ import { useState } from 'react'
 
 function Player() {
   return (
-    <div className='iterms-center flex w-full justify-between'>
-      <FindTrackOnYouTube />
+    <div className='iterms-center flex w-full flex-col justify-between gap-8'>
+      {/* 播放音质设置 */}
+      <PlayAudioLevel />
+      {/* YouTube 解锁设置 */}
+      <div className='flex w-full justify-between'>
+        <FindTrackOnYouTube />
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
+// 播放音质选择
+// ============================================================
+function PlayAudioLevel() {
+  const { t } = useTranslation()
+  const { playAudioLevel } = useSnapshot(settings)
+
+  return (
+    <div className='flex w-full flex-col justify-between'>
+      <div>
+        <BlockTitle>播放音质</BlockTitle>
+        <BlockDescription>
+          选择播放歌曲时请求的音质等级。无损及以上需要黑胶 VIP 账号。
+        </BlockDescription>
+      </div>
+      <Option>
+        <OptionText>音质等级</OptionText>
+        <select
+          className='w-1/2 rounded-md bg-black/10 px-2 py-1 text-lg outline-none
+            dark:bg-white/10 dark:text-white'
+          value={playAudioLevel}
+          onChange={e => {
+            settings.playAudioLevel = e.target.value as AudioLevel
+            toast.success('播放音质已切换为 ' + AUDIO_LEVEL_LABELS[e.target.value as AudioLevel])
+          }}
+        >
+          {AUDIO_LEVELS_ORDERED.map(level => (
+            <option key={level} value={level} className='bg-white dark:bg-neutral-800'>
+              {AUDIO_LEVEL_LABELS[level]}
+            </option>
+          ))}
+        </select>
+      </Option>
     </div>
   )
 }
