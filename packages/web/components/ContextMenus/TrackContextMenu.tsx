@@ -11,10 +11,7 @@ import player from '@/web/states/player'
 import useUserLikedTracksIDs, { useMutationLikeATrack } from '@/web/api/hooks/useUserLikedTracksIDs'
 import { useIsLoggedIn } from '@/web/api/hooks/useUser'
 import uiStates from '@/web/states/uiStates'
-import { useMemo, useRef } from 'react'
-import CoverRow from '@/web/components/CoverRow'
-import useUserPlaylists from '@/web/api/hooks/useUserPlaylists'
-import useUser from '@/web/api/hooks/useUser'
+import { useMemo } from 'react'
 import Image from '../Image'
 import { resizeImage } from '@/web/utils/common'
 import { cx } from '@emotion/css'
@@ -68,9 +65,7 @@ const TrackContextMenu = () => {
     [playlists, user]
   )
 
-  // 关键：去掉 AnimatePresence 包装
-  // 因为 BasicContextMenu 内部用了 createPortal，
-  // AnimatePresence 无法追踪 portal 里的 DOM，会导致 React 崩溃
+  // 没有任何动画包装，直接返回菜单
   if (type !== 'track' || !dataSourceID || !target || !cursorPosition) {
     return null
   }
@@ -104,9 +99,7 @@ const TrackContextMenu = () => {
             player.deleteFromPlaylist(Number(dataSourceID))
           },
         },
-        {
-          type: 'divider',
-        },
+        { type: 'divider' },
         {
           type: 'item',
           label: t`context-menu.go-to-artist`,
@@ -129,9 +122,7 @@ const TrackContextMenu = () => {
             if (track?.al?.id) navigate(`/album/${track.al.id}`)
           },
         },
-        {
-          type: 'divider',
-        },
+        { type: 'divider' },
         {
           type: 'item',
           label: t`context-menu.add-to-liked-tracks`,
