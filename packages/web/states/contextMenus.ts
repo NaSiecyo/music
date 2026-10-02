@@ -38,27 +38,23 @@ const removeGlobalListener = () => {
 }
 
 const addGlobalListener = () => {
-  // 避免重复绑定
   removeGlobalListener()
 
   globalHandler = (e: MouseEvent) => {
-    // 找到真实菜单容器（measure 版本被标记为 data-context-menu-measure）
     const menuEl = document.querySelector(
       '[data-context-menu-root]:not([data-context-menu-measure])'
     ) as HTMLElement | null
 
-    // 如果菜单还没渲染出来，不处理
     if (!menuEl) return
-
-    // 点击在菜单内 → 不关闭（让菜单项的 onClick 处理）
     if (menuEl.contains(e.target as Node)) return
 
-    // 其他情况 → 关闭菜单
+    console.log('[menu] 点击外部，关闭菜单')
     closeContextMenu()
   }
 
-  // 捕获阶段绑定，不受任何组件 stopPropagation 影响
+  // 捕获阶段绑定，不受 stopPropagation 影响
   document.addEventListener('mousedown', globalHandler, true)
+  console.log('[menu] 全局监听器已绑定')
 }
 
 // ============================================================
@@ -75,7 +71,6 @@ export const openContextMenu = ({
   dataSourceID: ContextMenu['dataSourceID']
   options?: ContextMenu['options']
 }) => {
-  // 再次右键同一个元素 → toggle 关闭
   if (event.target === contextMenus.target) {
     closeContextMenu()
     return
@@ -91,9 +86,6 @@ export const openContextMenu = ({
     y: event.clientY,
   }
 
-  // 关键：延迟一帧后绑定监听器
-  // 原因是当前这次右键事件本身也会触发 mousedown，
-  // 如果立即绑定，会被自己触发导致菜单刚开就关
   setTimeout(addGlobalListener, 0)
 }
 
@@ -101,6 +93,16 @@ export const openContextMenu = ({
 // 关闭菜单
 // ============================================================
 export const closeContextMenu = () => {
+  console.log('[menu] closeContextMenu 被调用')
   removeGlobalListener()
   assign(contextMenus, initContextMenu)
+}
+
+// ============================================================
+// 调试用：暴露到 window，方便在 Console 里手动测试
+// ============================================================
+if (typeof window !== 'undefined') {
+  ;(window as any).closeContextMenu = closeContextMenu
+  ;(window as any).openContextMenu = openContextMenu
+  ;(window as any).contextMenus = contextMenus
 }
