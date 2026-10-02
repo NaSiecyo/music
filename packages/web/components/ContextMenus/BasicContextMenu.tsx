@@ -24,33 +24,56 @@ const BasicContextMenu = ({
   classNames?: string
 }) => {
   const menuRef = useRef<HTMLDivElement>(null)
-  const [measureRef, menu] = useMeasure()
+  const [measureRef, menuBounds] = useMeasure()
   const [position, setPosition] = useState<ContextMenuPosition | null>(null)
 
   useLockMainScroll(!!position)
 
+  // 关键：用 useRef 缓存尺寸，避免 menuBounds 对象变化导致循环
+  const sizeRef = useRef({ width: 0, height: 0 })
+  if (menuBounds.width > 0 && menuBounds.height > 0) {
+    sizeRef.current = { width: menuBounds.width, height: menuBounds.height }
+  }
+
+  // 只在尺寸真正变化时才重新计算位置
+  const lastSizeRef = useRef({ width: -1, height: -1 })
   useLayoutEffect(() => {
+    const { width, height } = sizeRef.current
+
+    // 尺寸没变过 + 已经有 position → 不重复计算
+    if (
+      lastSizeRef.current.width === width &&
+      lastSizeRef.current.height === height &&
+      position
+    ) {
+      return
+    }
+
+    if (width === 0 || height === 0) return
+
+    lastSizeRef.current = { width, height }
+
     if (options?.useCursorPosition) {
       const leftX = cursorPosition.x
-      const rightX = cursorPosition.x - menu.width
+      const rightX = cursorPosition.x - width
       const bottomY = cursorPosition.y
-      const topY = cursorPosition.y - menu.height
+      const topY = cursorPosition.y - height
       setPosition({
-        x: leftX + menu.width < window.innerWidth ? leftX : rightX,
-        y: bottomY + menu.height < window.innerHeight ? bottomY : topY,
+        x: leftX + width < window.innerWidth ? leftX : rightX,
+        y: bottomY + height < window.innerHeight ? bottomY : topY,
       })
     } else {
       const button = target.getBoundingClientRect()
       const leftX = button.x
-      const rightX = button.x - menu.width + button.width
+      const rightX = button.x - width + button.width
       const bottomY = button.y + button.height + 8
-      const topY = button.y - menu.height - 8
+      const topY = button.y - height - 8
       setPosition({
-        x: leftX + menu.width < window.innerWidth ? leftX : rightX,
-        y: bottomY + menu.height < window.innerHeight ? bottomY : topY,
+        x: leftX + width < window.innerWidth ? leftX : rightX,
+        y: bottomY + height < window.innerHeight ? bottomY : topY,
       })
     }
-  }, [target, menu, options?.useCursorPosition, cursorPosition])
+  }, [menuBounds.width, menuBounds.height, target, cursorPosition, options?.useCursorPosition])
 
   useEffect(() => {
     if (!position) return
