@@ -4,6 +4,55 @@ import { proxy, subscribe } from 'valtio'
 import i18n, { getInitLanguage, SupportedLanguage, supportedLanguages } from '../i18n/i18n'
 import { getKeyboardShortcutDefaultSettings } from '@/shared/defaultSettings'
 
+// ============================================================
+// 音质等级相关类型定义
+// ============================================================
+
+/**
+ * 所有支持的音质等级（来自网易云 API 的 level 参数）
+ * - standard: 标准 128kbps
+ * - higher:   较高 192kbps
+ * - exhigh:   极高 320kbps（推荐，无需 VIP）
+ * - lossless: 无损 FLAC（需 VIP）
+ * - hires:    Hi-Res 音质（需 VIP）
+ * - jymaster: 超清母带（需 SVIP）
+ */
+export type AudioLevel =
+  | 'standard'
+  | 'higher'
+  | 'exhigh'
+  | 'lossless'
+  | 'hires'
+  | 'jymaster'
+
+/**
+ * 音质等级的显示名称，用于下拉框选项
+ */
+export const AUDIO_LEVEL_LABELS: Record<AudioLevel, string> = {
+  standard: '标准音质 (128kbps)',
+  higher: '较高音质 (192kbps)',
+  exhigh: '极高音质 (320kbps)',
+  lossless: '无损音质 (FLAC)',
+  hires: 'Hi-Res 音质',
+  jymaster: '超清母带',
+}
+
+/**
+ * 按顺序排列的音质等级，用于下拉框渲染
+ */
+export const AUDIO_LEVELS_ORDERED: AudioLevel[] = [
+  'standard',
+  'higher',
+  'exhigh',
+  'lossless',
+  'hires',
+  'jymaster',
+]
+
+// ============================================================
+// 设置项类型
+// ============================================================
+
 interface Settings {
   accentColor: string
   language: SupportedLanguage
@@ -34,6 +83,14 @@ interface Settings {
   showDownloadActions: boolean
   enableBreathingEffect: boolean
   autoLowPowerMode: boolean
+
+  // ============================================================
+  // 新增：音质设置
+  // ============================================================
+  /** 播放时使用的音质等级 */
+  playAudioLevel: AudioLevel
+  /** 下载时使用的音质等级（默认无损，需 VIP） */
+  downloadAudioLevel: AudioLevel
 }
 
 /**
@@ -49,6 +106,10 @@ export const isLowPowerDevice = () => {
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
   return cores <= 4 || (typeof memory === 'number' && memory <= 4)
 }
+
+// ============================================================
+// 默认设置
+// ============================================================
 
 const initSettings: Settings = {
   accentColor: 'yellow',
@@ -76,7 +137,15 @@ const initSettings: Settings = {
   showDownloadActions: false,
   enableBreathingEffect: true,
   autoLowPowerMode: true,
+
+  // 新增默认值：播放用 320kbps（免费且音质好），下载用无损（需 VIP）
+  playAudioLevel: 'exhigh',
+  downloadAudioLevel: 'lossless',
 }
+
+// ============================================================
+// 从 localStorage 恢复 + 合并
+// ============================================================
 
 const STORAGE_KEY = 'settings'
 
@@ -97,4 +166,5 @@ subscribe(settings, () => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   window.ipcRenderer?.send(IpcChannels.SyncSettings, JSON.parse(JSON.stringify(settings)))
 })
+
 export default settings
