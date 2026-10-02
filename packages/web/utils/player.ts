@@ -44,6 +44,7 @@ export enum State {
 const PLAY_PAUSE_FADE_DURATION = 200
 
 let _howler = new Howl({ src: [''], format: ['mp3', 'flac'] })
+
 export class Player {
   private _track: Track | null = null
   private _trackIndex: number = 0
@@ -286,18 +287,32 @@ export class Player {
       })
   }
 
-  async getAudioSource(track_id: TrackID) {
-    return await this._fetchAudioSource(track_id)
+  /**
+   * 获取音频源（公开接口）
+   *
+   * @param track_id 歌曲 ID
+   * @param level    可选，音质等级。不传则用 settings.playAudioLevel（由
+   *                 useTracks.ts 里的 fetchAudioSourceWithReactQuery 自动注入）
+   */
+  async getAudioSource(track_id: TrackID, level?: string) {
+    return await this._fetchAudioSource(track_id, level)
   }
 
   /**
    * Fetch track audio source url from Netease
+   *
    * @param {TrackID} trackID
+   * @param {string}  [level] 可选音质等级：
+   *                  standard / higher / exhigh / lossless / hires / jymaster
+   *                  不传则由上层 useTracks.ts 的默认逻辑注入 settings.playAudioLevel
    */
-  private async _fetchAudioSource(trackID: TrackID) {
+  private async _fetchAudioSource(trackID: TrackID, level?: string) {
     try {
       // console.log(`[player] fetchAudioSourceWithReactQuery `, trackID)
-      const response = await fetchAudioSourceWithReactQuery({ id: trackID })
+      const response = await fetchAudioSourceWithReactQuery({
+        id: trackID,
+        level,
+      } as any)
       // console.log(`[player] fetchAudioSourceWithReactQuery `, response)
       let audio = response.data?.[0]?.url
       if (audio && audio.includes('126.net')) {
@@ -381,7 +396,9 @@ export class Player {
           /* ignore */
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     ;(window as any).howler = howler
     if (autoplay) {
@@ -395,7 +412,6 @@ export class Player {
     if (!this._progressInterval) {
       this._setupProgressInterval()
     }
-
   }
 
   private _howlerOnEndCallback() {
@@ -571,17 +587,16 @@ export class Player {
 
   /**
    * deleteFromPlaylist() - function to remove a track from current play queue
-   * 
+   *
    * @param trackID
    */
-
   deleteFromPlaylist(trackID: number) {
     // Check if the song existed in the tracklist
     if (!this.trackList.includes(trackID)) {
       return
     }
     // Check whether we are deleting the content that we are playing
-    if (this.track?.id != undefined && this.track?.id != trackID){
+    if (this.track?.id != undefined && this.track?.id != trackID) {
       this.trackList = this.trackList.filter(item => item != trackID)
       return
     }
