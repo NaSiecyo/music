@@ -1,7 +1,6 @@
 import { fetchTracksWithReactQuery } from '@/web/api/hooks/useTracks'
 import { fetchTracks } from '@/web/api/track'
 import contextMenus, { closeContextMenu } from '@/web/states/contextMenus'
-import { AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -45,7 +44,6 @@ const Playlist = ({ playlist, datasourceID }: { playlist: Playlist; datasourceID
         src={resizeImage(playlist.coverImgUrl || playlist?.picUrl || '', 'xs')}
         className='aspect-square h-10 w-10 rounded-24'
       />
-      {/* Name */}
       <div className='bottom-0 p-3 text-sm font-medium  transition-all duration-400'>
         {playlist.name}
       </div>
@@ -70,139 +68,140 @@ const TrackContextMenu = () => {
     [playlists, user]
   )
 
+  // 关键：去掉 AnimatePresence 包装
+  // 因为 BasicContextMenu 内部用了 createPortal，
+  // AnimatePresence 无法追踪 portal 里的 DOM，会导致 React 崩溃
+  if (type !== 'track' || !dataSourceID || !target || !cursorPosition) {
+    return null
+  }
+
   return (
-    <AnimatePresence>
-      {type === 'track' && dataSourceID && target && cursorPosition && (
-        <BasicContextMenu
-          target={target}
-          cursorPosition={cursorPosition}
-          onClose={closeContextMenu}
-          options={options}
-          items={[
+    <BasicContextMenu
+      target={target}
+      cursorPosition={cursorPosition}
+      onClose={closeContextMenu}
+      options={options}
+      items={[
+        {
+          type: 'item',
+          label: t`context-menu.play`,
+          onClick: () => {
+            player.addToFirstPlay(Number(dataSourceID))
+            player.playTrack(Number(dataSourceID))
+          },
+        },
+        {
+          type: 'item',
+          label: t`context-menu.add-to-queue`,
+          onClick: () => {
+            player.addToNextPlay(Number(dataSourceID))
+          },
+        },
+        {
+          type: 'item',
+          label: t`context-menu.delete-from-queue`,
+          onClick: () => {
+            player.deleteFromPlaylist(Number(dataSourceID))
+          },
+        },
+        {
+          type: 'divider',
+        },
+        {
+          type: 'item',
+          label: t`context-menu.go-to-artist`,
+          onClick: async () => {
+            const tracks = await fetchTracksWithReactQuery({
+              ids: [Number(dataSourceID)],
+            })
+            const track = tracks?.songs?.[0]
+            if (track) navigate(`/artist/${track.ar[0].id}`)
+          },
+        },
+        {
+          type: 'item',
+          label: t`context-menu.go-to-album`,
+          onClick: async () => {
+            const tracks = await fetchTracksWithReactQuery({
+              ids: [Number(dataSourceID)],
+            })
+            const track = tracks?.songs?.[0]
+            if (track?.al?.id) navigate(`/album/${track.al.id}`)
+          },
+        },
+        {
+          type: 'divider',
+        },
+        {
+          type: 'item',
+          label: t`context-menu.add-to-liked-tracks`,
+          onClick: () => {
+            if (!loggedIn) {
+              toast.error('Plz login first')
+              uiStates.showLoginPanel = true
+              return
+            }
+            likeATrack.mutateAsync(Number(dataSourceID)).then(() => {
+              toast.success('Like Success')
+            })
+          },
+        },
+        {
+          type: 'submenu',
+          label: t`context-menu.add-to-playlist`,
+          items: [
             {
               type: 'item',
-              label: t`context-menu.play`,
+              children: (
+                <>
+                  <div className='no-scrollbar h-64 w-full overflow-y-auto rounded-12 bg-white/10 dark:bg-black/10'>
+                    {myPlaylists?.map(playlist => (
+                      <Playlist
+                        key={playlist.id}
+                        playlist={playlist}
+                        datasourceID={Number(dataSourceID)}
+                      />
+                    ))}
+                  </div>
+                </>
+              ),
+            },
+          ],
+        },
+        ...(showDownloadActions
+          ? [
+              {
+                type: 'item' as const,
+                label: t`context-menu.download`,
+                onClick: () => downloadTrack(Number(dataSourceID)),
+              },
+            ]
+          : []),
+        {
+          type: 'submenu',
+          label: t`context-menu.share`,
+          items: [
+            {
+              type: 'item',
+              label: t`context-menu.copy-netease-link`,
               onClick: () => {
-                player.addToFirstPlay(Number(dataSourceID))
-                player.playTrack(Number(dataSourceID))
+                copyToClipboard(`https://music.163.com/#/song?id=${dataSourceID}`)
+                toast.success(t`toasts.copied`)
               },
             },
             {
               type: 'item',
-              label: t`context-menu.add-to-queue`,
-              onClick: () => {
-                player.addToNextPlay(Number(dataSourceID))
-              },
-            },
-            {
-              type: 'item',
-              label: t`context-menu.delete-from-queue`,
-              onClick: () => {
-                player.deleteFromPlaylist(Number(dataSourceID))
-              }
-            },
-            {
-              type: 'divider',
-            },
-            {
-              type: 'item',
-              label: t`context-menu.go-to-artist`,
+              label: t`context-menu.copy-r3playx-link`,
               onClick: async () => {
-                const tracks = await fetchTracksWithReactQuery({
-                  ids: [Number(dataSourceID)],
-                })
-                const track = tracks?.songs?.[0]
-                if (track) navigate(`/artist/${track.ar[0].id}`)
+                const audioSource = await player.getAudioSource(Number(dataSourceID))
+                copyToClipboard(`${audioSource.audio}`)
+                toast.success(t`toasts.copied`)
               },
             },
-            {
-              type: 'item',
-              label: t`context-menu.go-to-album`,
-              onClick: async () => {
-                const tracks = await fetchTracksWithReactQuery({
-                  ids: [Number(dataSourceID)],
-                })
-                const track = tracks?.songs?.[0]
-                if (track?.al?.id) navigate(`/album/${track.al.id}`)
-              },
-            },
-            {
-              type: 'divider',
-            },
-            {
-              type: 'item',
-              label: t`context-menu.add-to-liked-tracks`,
-              onClick: () => {
-                if (!loggedIn) {
-                  toast.error('Plz login first')
-                  uiStates.showLoginPanel = true
-                  return
-                }
-                likeATrack.mutateAsync(Number(dataSourceID)).then(() => {
-                  toast.success('Like Success')
-                })
-              },
-            },
-            {
-              type: 'submenu',
-              label: t`context-menu.add-to-playlist`,
-              items: [
-                {
-                  type: 'item',
-                  children: (
-                    <>
-                      <div className='no-scrollbar h-64 w-full overflow-y-auto rounded-12 bg-white/10 dark:bg-black/10'>
-                        {myPlaylists?.map(playlist => (
-                          <Playlist
-                            key={playlist.id}
-                            playlist={playlist}
-                            datasourceID={Number(dataSourceID)}
-                          />
-                        ))}
-                      </div>
-                    </>
-                  ),
-                },
-              ],
-            },
-            // Download entry is opt-in: hidden unless the user enables it in
-            // settings (`showDownloadActions`, default off).
-            ...(showDownloadActions
-              ? [
-                  {
-                    type: 'item' as const,
-                    label: t`context-menu.download`,
-                    onClick: () => downloadTrack(Number(dataSourceID)),
-                  },
-                ]
-              : []),
-            {
-              type: 'submenu',
-              label: t`context-menu.share`,
-              items: [
-                {
-                  type: 'item',
-                  label: t`context-menu.copy-netease-link`,
-                  onClick: () => {
-                    copyToClipboard(`https://music.163.com/#/song?id=${dataSourceID}`)
-                    toast.success(t`toasts.copied`)
-                  },
-                },
-                {
-                  type: 'item',
-                  label: t`context-menu.copy-r3playx-link`,
-                  onClick: async () => {
-                    const audioSource = await player.getAudioSource(Number(dataSourceID))
-                    copyToClipboard(`${audioSource.audio}`)
-                    toast.success(t`toasts.copied`)
-                  },
-                },
-              ],
-            },
-          ]}
-        />
-      )}
-    </AnimatePresence>
+          ],
+        },
+      ]}
+    />
   )
 }
 
